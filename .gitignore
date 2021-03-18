@@ -1,0 +1,13 @@
+*.sln
+*vcxproj*
+.vs
+.vscode
+__pycache__
+x64
+202*
+test_octree.py
+test_util.py
+registration.py
+feature_register.py
+example_global_registration.py
+calc_plucker.py
