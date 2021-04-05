@@ -59,7 +59,9 @@ timestamp_data = timestamp_data[start_frame:-end_frame:1,:]
 
 pose_data = continous_quat(pose_data)
 
-plt.rcParams.update({"font.size" : 28})
+plt.rcParams.update({"font.size" : 40})
+plt.rcParams.update({"font.sans-serif" : "Arial"})
+plt.rcParams.update({"font.family" : "sans-serif"})
 
 # quat0_inv = quaternion_mul_num([0.998009114291437,0.00513295678935018,0.00686830899720483,0.0624842930450399], quat_inv(pose_data[0,6:10]))
 # for i in range(pose_data.shape[0]):
@@ -122,7 +124,10 @@ print(qd_true)
 print(ekf_log[-1,9:13])
 print(quaternion_mul_num(qd_true, quat_inv(ekf_log[-1,9:13])))
 
-plt.figure(1, figsize=(16,9))
+fig=plt.figure(1, figsize=(16,9))
+fig.subplots_adjust(bottom=0.15)
+fig.subplots_adjust(top=0.99)
+fig.subplots_adjust(right=0.99)
 color_list = ["tab:blue", "tab:orange", "tab:green"]
 var_name = ["$\omega_{px}$", "$\omega_{py}$", "$\omega_{pz}$"]
 for i in range(3):
@@ -130,17 +135,22 @@ for i in range(3):
     plt.plot(timestamp_data[1:-1,1], ekf_log[1:-1, i], linewidth=3, color=color_list[i], label=var_name[i])
 plt.xlabel('Time(s)')
 plt.ylabel('$\mathbf{\omega_{p}} (rad/s)$')
+plt.xticks(np.arange(0,121,step=20))
 plt.grid()
 plt.legend()
 plt.show()
 
-plt.figure(2, figsize=(16,9))
+fig=plt.figure(2, figsize=(16,9))
+fig.subplots_adjust(bottom=0.15)
+fig.subplots_adjust(top=0.99)
+fig.subplots_adjust(right=0.99)
 color_list = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
 for i in range(4):
     plt.plot(timestamp_data[1:-1,1], qb_real[1:-1, i], '--', linewidth=3, color=color_list[i])
     plt.plot(timestamp_data[1:-1,1], ekf_log[1:-1, 3+i], linewidth=3, color=color_list[i], label=f"$q_{{b}}{{}}_{i}$")
 plt.xlabel('Time(s)')
 plt.ylabel('$\mathbf{q_{b}}$')
+plt.xticks(np.arange(0,121,step=20))
 plt.grid()
 plt.legend()
 plt.show()
@@ -176,6 +186,9 @@ for i in range(ekf_log.shape[0]):
     I_estimate[i, :] = I_estimate[i, :]/np.linalg.norm(I_estimate[i,:])
 
 fig, ax = plt.subplots(figsize=(16,9))
+fig.subplots_adjust(bottom=0.15)
+fig.subplots_adjust(top=0.99)
+fig.subplots_adjust(right=0.99)
 color_list = ["tab:blue", "tab:orange", "tab:green"]
 for i in range(3):
     ax.plot((np.ones((ekf_log.shape[0],1)) * I_real[i])[1:-1,:], '--', linewidth=3, color=color_list[i])
@@ -189,11 +202,14 @@ for i in range(5):
         ax.add_patch(Rectangle((left, 0), width, 1, color="lightblue"))
     ax.text(left+width/2, 0.1, f"{i+1}")
 plt.yticks(np.arange(0,1.01,step=0.2))
-plt.legend(loc="upper right", prop={"size":22})
+plt.legend(loc="upper right", prop={"size":40})
 plt.show()
 
 
 fig, ax = plt.subplots(figsize=(16,9))
+fig.subplots_adjust(bottom=0.15)
+fig.subplots_adjust(top=0.99)
+fig.subplots_adjust(right=0.99)
 color_list = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
 for i in range(4):
     ax.plot((np.ones((ekf_log.shape[0],1)) * qd_true[i])[1:-1,:], '--', linewidth=3, color=color_list[i])
@@ -208,7 +224,7 @@ for i in range(5):
     ax.text(left+width/2, -0.2, f"{i+1}")
 
 plt.yticks(np.arange(-0.3,1.01,step=0.2))
-plt.legend(loc="upper right", prop={"size":22})
+plt.legend(loc="upper right", prop={"size":40})
 plt.show()
 
 

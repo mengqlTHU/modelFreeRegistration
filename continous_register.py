@@ -5,6 +5,7 @@ from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 from math import exp
 from ekf import ekf_predict, ekf_update, quaternion_mul_num, quat_inv, ekf_h
+from multiplicative_ekf import mekf_predict, mekf_update
 import rtree.index as RIndex
 from bisect import bisect
 
@@ -114,7 +115,12 @@ def to_scalar_first(q):
 def normalize_state(q_in):
     q_in[3:7] = q_in[3:7]/np.linalg.norm(q_in[3:7])
     q_in[9:13] = q_in[9:13]/np.linalg.norm(q_in[9:13])
-    return q_in 
+    return q_in
+
+def mekf_normalize_state(q_in):
+    q_in[11:15] = q_in[11:15]/np.linalg.norm(q_in[11:15])
+    q_in[15:19] = q_in[15:19]/np.linalg.norm(q_in[15:19])
+    return q_in  
 
 def get_quat_angle(q_in):
     r = Rotation.from_quat(to_scalar_last(q_in))
@@ -136,7 +142,7 @@ def register_and_filter_once(x, filt_times, has_measurement):
 
     if has_measurement:
         measurement = np.genfromtxt(f'{filepath}registration_measurement.csv', delimiter=',')
-        x = filter_without_register(x, filt_times, filepath, measurement, timestamp_data)
+        x = mekf_filter_without_register(x, filt_times, filepath, measurement, timestamp_data)
         return x, measurement
 
     pose_data = continous_quat(pose_data)
@@ -575,49 +581,7 @@ def filter_without_register(x, filt_times, filepath, measurement_raw, timestamp_
         # P[3:7] = P[3:7]/(10**shrink_index)
         # Q[3:7] = Q[3:7]/(10**shrink_index)
 
-    # power_shrink = min(filt_times-1, 2)
-    # P[7:9,:] = P[7:9,:]/(10**power_shrink)
-    # Q[7:9,:] = Q[7:9,:]/(10**power_shrink)
 
-    # power_shrink = min(filt_times-1, 3)
-    # P[2,:] = P[2,:]/(10**power_shrink)
-    # Q[2,:] = Q[2,:]/(10**power_shrink)
-
-    # power_shrink = min(filt_times-1, 2)
-    # P[0:2,:] = P[0:2,:]/(10**power_shrink)
-    # Q[0:2,:] = Q[0:2,:]/(10**power_shrink)
-
-    # power_shrink = min(filt_times-1, 2) 
-    # P[9:13,:] = P[9:13,:]/(10**power_shrink)
-    # Q[9:13,:] = Q[9:13,:]/(10**power_shrink)
-
-    # power_shrink = min(filt_times-1, 2) 
-    # P[3:7,:] = P[3:7,:]/(10**power_shrink)
-    # Q[3:7,:] = Q[3:7,:]/(10**power_shrink)
-
-    # R = 1e-5*np.diag(np.asarray([1,1,1,1,1,1,1]))
-    # P = 1e-4*np.diag(np.asarray([0.001,0.001,1,1,1,1,1,10,10,10,10,10,10]))
-    # Q = 1e-8*np.diag(np.asarray([0.001,0.001,1,1,1,1,1,10,10,10,10,10,10]))
-
-    # power_shrink = min(filt_times-1, 3)
-    # P[7:9,:] = P[7:9,:]/(10**power_shrink)
-    # Q[7:9,:] = Q[7:9,:]/(10**power_shrink)
-
-    # # power_shrink = min(filt_times-1, 4)
-    # # P[2,:] = P[2,:]/(10**power_shrink)
-    # # Q[2,:] = Q[2,:]/(10**power_shrink)
-
-    # # power_shrink = min(filt_times-1, 3)
-    # P[0:2,:] = P[0:2,:]*(10**power_shrink)
-    # Q[0:2,:] = Q[0:2,:]*(10**power_shrink)
-
-    # # power_shrink = min(filt_times-1, 3) 
-    # P[9:13,:] = P[9:13,:]/(10**power_shrink)
-    # Q[9:13,:] = Q[9:13,:]/(10**power_shrink)
-
-    # # power_shrink = min(filt_times-1, 3) 
-    # P[3:7,:] = P[3:7,:]/(10**power_shrink)
-    # Q[3:7,:] = Q[3:7,:]/(10**power_shrink)
 
     x_log = np.zeros((measurement.shape[0],13))
     x_log[0,:] = x
@@ -640,30 +604,77 @@ def filter_without_register(x, filt_times, filepath, measurement_raw, timestamp_
     np.savetxt(f"{filepath}ekf_log_all_{filt_times}.csv", x_log, delimiter=',')
     return x
 
-if __name__ == '__main__':
-    x0 = np.zeros((13,))
-    x0[9] = 1
-    # x0[9] = 0.84
-    # x0[10] = 0.53
-    # x0[11] = -0.06
-    # x0[12] = 0.11
-    x_end, _ = register_and_filter_once(x0, 1, False)
-    # x_end[0:3] = -x_end[0:3]
-    # x_end, _ = register_and_filter_once(x_end, 2, True)
-    # x_end[0:3] = -x_end[0:3]
-    # x_end, _ = register_and_filter_once(x_end, 3, True)
-    # x_end[0:3] = -x_end[0:3]
-    # x_end, _ = register_and_filter_once(x_end, 4, True)
-    # x_end[0:3] = -x_end[0:3]
-    # x_end, _ = register_and_filter_once(x_end, 5, True)
-    # x_end[0:3] = -x_end[0:3]
-    # x_end, _ = register_and_filter_once(x_end, 6, True)
-    # x_end[0:3] = -x_end[0:3]
-    # x_end, _ = register_and_filter_once(x_end, 7, True)
+def mekf_filter_without_register(x, filt_times, filepath, measurement_raw, timestamp_data):
 
-    I_real = np.asarray([20, 35, 50])
+    measurement = copy.deepcopy(measurement_raw)
+    # In reverse Order
+    if filt_times%2==0:
+        measurement = measurement[::-1, :]
+        timestamp_data = timestamp_data[::-1, :]
+        for i in range(1, measurement.shape[0]):
+            measurement[measurement.shape[0] - i, 0:3] = -measurement[measurement.shape[0] - i - 1, 0:3]
+            # measurement[i, 0:3] = -measurement[i, 0:3]
+
+    R = 1e-5*np.diag(np.asarray([1,1,1]))
+    if filt_times == 1:
+        P = 1e-4*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,10,10,1,1,1]))
+        Q = 1e-8*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,10,10,1,1,1]))
+    else:
+        P = 1e-4*np.diag(np.asarray([0.001,0.001,0.001,1,1,1,10,10,1,1,1]))
+        Q = 1e-8*np.diag(np.asarray([0.001,0.001,0.001,1,1,1,10,10,1,1,1]))
+        shrink_list = [3, 5, 7]
+        shrink_index = bisect(shrink_list, filt_times)
+        P[7:9,:] = P[7:9,:]/(10**shrink_index)
+        Q[7:9,:] = Q[7:9,:]/(10**shrink_index)
+        # P[9:13,:] = P[9:13,:]/(10**shrink_index)
+        # Q[9:13,:] = Q[9:13,:]/(10**shrink_index)
+        # P[3:7] = P[3:7]/(10**shrink_index)
+        # Q[3:7] = Q[3:7]/(10**shrink_index)
+
+    x_log = np.zeros((measurement.shape[0],19))
+    x_log[0,:] = x
+
+    for i in range(measurement.shape[0]-1):
+        
+        dtime = abs(timestamp_data[i+1, 1] - timestamp_data[i, 1])
+        x_predict, P = mekf_predict(x, P, Q, dtime)
+
+
+        # z_measure[3:7] = target_quat_raw
+        z_measure = measurement[i + 1, 3:7]
+        x_correct, P, z_correct = mekf_update(x_predict, P, z_measure, R, dtime)
+        
+        x_correct = mekf_normalize_state(x_correct)
+
+        x_log[i+1,:] = x_correct
+        x = x_correct
+
+    np.savetxt(f"{filepath}mekf_log_all_{filt_times}.csv", x_log, delimiter=',')
+    return x
+
+if __name__ == '__main__':
+    # x0 = np.zeros((13,))
+    # x0[9] = 1
+    x0 = np.zeros((19,))
+    x0[11] = 1
+    x0[15] = 1
+    x_end, _ = register_and_filter_once(x0, 1, True)
+    x_end[0:3] = -x_end[0:3]
+    x_end, _ = register_and_filter_once(x_end, 2, True)
+    x_end[0:3] = -x_end[0:3]
+    x_end, _ = register_and_filter_once(x_end, 3, True)
+    x_end[0:3] = -x_end[0:3]
+    x_end, _ = register_and_filter_once(x_end, 4, True)
+    x_end[0:3] = -x_end[0:3]
+    x_end, _ = register_and_filter_once(x_end, 5, True)
+    x_end[0:3] = -x_end[0:3]
+    x_end, _ = register_and_filter_once(x_end, 6, True)
+    x_end[0:3] = -x_end[0:3]
+    x_end, _ = register_and_filter_once(x_end, 7, True)
+
+    I_real = np.asarray([20, 50, 50])
     I_real = I_real/np.linalg.norm(I_real)
-    k1, k2 = x_end[7], x_end[8]
+    k1, k2 = x_end[6], x_end[7]
     I_estimate = np.sort(np.asarray([exp(k1), 1, exp(-k2)]))
     I_estimate = I_estimate/np.linalg.norm(I_estimate)
 
