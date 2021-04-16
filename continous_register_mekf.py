@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 from math import exp
 from ekf import ekf_predict, ekf_update, quaternion_mul_num, quat_inv, ekf_h
-from multiplicative_ekf import mekf_predict, mekf_update
+from multiplicative_ekf import mekf_predict, mekf_update, mekf_update_without_correction
 from unscented_filter import ukf_f, ukf_h, ukf_update
 import rtree.index as RIndex
 from bisect import bisect
@@ -30,30 +30,6 @@ def generate_disturb_rotation():
     theta = 1.5
     r = Rotation.from_rotvec(abs(theta)*norm_vec)
     return r
-
-def repeat_register(source, target, origin_transform):
-    r = Rotation.from_matrix(origin_transform[:3, :3])
-    rotvec = r.as_rotvec()
-    eta = np.random.normal(1.0, 0.1)
-    disturb_rot = Rotation.from_rotvec(eta*rotvec)
-    # disturb_rot = generate_disturb_rotation()
-    # disturb_transform = copy.deepcopy(origin_transform)
-    # disturb_transform[:3, :3] = disturb_rot.as_matrix() @ disturb_transform[:3, :3]
-    # disturb_transform[:3, 3] += np.random.normal(scale=0.01, size=3).T
-    source_temp = copy.deepcopy(source)
-    # source_temp.transform(disturb_transform)
-    disturb_rotation = disturb_rot.as_matrix() @ origin_transform[:3, :3]
-    source_temp.rotate(disturb_rotation)
-
-    result_icp = o3d.pipelines.registration.registration_icp(
-        source_temp, target, 0.05, np.identity(4),
-        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=1e-12,
-                                            relative_rmse=1e-12,
-                                            max_iteration=50))
-
-    # # return result_icp.transformation @ disturb_transform
-    return result_icp.transformation[:3, :3] @ disturb_rotation
     
 def draw_registration_result_original_color(source, target, transformation):
     source_temp = copy.deepcopy(source)
@@ -145,11 +121,6 @@ def register_and_filter_once(x, filt_times, has_measurement):
     pose_data = pose_data[start_frame:-end_frame:1,:]
     timestamp_data = timestamp_data[start_frame:-end_frame:1,:]
 
-    if has_measurement:
-        measurement = np.genfromtxt(f'{filepath}registration_measurement.csv', delimiter=',')
-        x = mekf_filter_without_register(x, filt_times, filepath, measurement[::1,:], timestamp_data[::1,:])
-        return x, measurement
-
     pose_data = continous_quat(pose_data)
 
     quat0_inv = quat_inv(pose_data[0,6:10])
@@ -188,41 +159,16 @@ def register_and_filter_once(x, filt_times, has_measurement):
     nowR_jump = copy.deepcopy(nowR)
 
     ## EKF SETTING
-    # x = np.zeros((9,))
-    # x[3:7] = source_quat_zero_raw
-    # R = 1e-4*np.identity(3)
-    # P = 1e-2*np.diag(np.asarray([1,1,1,1,1,1,1,100,100]))
-    # Q = 1e-10*np.diag(np.asarray([1,1,1,1,1,1,1,100,100]))
-    # x_log = np.zeros((pose_data.shape[0],9))
-    # x_log[0,:] = x
-    # x = np.zeros((13,))
-    # x[2] = 0
-    if filt_times == 1:
-        x[3:7] = source_quat_zero_raw
-    # x[9] = 1
-    R = 1e-5*np.diag(np.asarray([1,1,1,1,1,1,1]))
-    P = 1e-4*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,1,10,10,1,1,1,1]))
-    Q = 1e-8*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,1,10,10,1,1,1,1]))
-    P[7:13,:] = P[7:13,:]/(10**(filt_times-1))
-    Q[7:13,:] = Q[7:13,:]/(10**(filt_times-1))
-    P[2,:] = P[2,:]/(10**(filt_times-1))
-    Q[2,:] = Q[2,:]/(10**(filt_times-1))
+    R = 1e-5*np.diag(np.asarray([1,1,1]))
+    P = 1e-4*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,10,10,1,1,1]))
+    Q = 1e-8*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,10,10,1,1,1]))
 
-    # R = 1e-4*np.diag(np.asarray([1,1,1,0.1,0.1,0.1,0.1]))
-    # P = 1e-4*np.diag(np.asarray([1,1,1,1,1,1,1,100,100,1,1,1,1]))/(10**(0*(filt_times-1)))
-    # Q = 1e-8*np.diag(np.asarray([10,10,10,1,1,1,1,100,100,1,1,1,1]))/(10**(1*(filt_times-1)))
-
-    x_log = np.zeros((pose_data.shape[0],13))
+    x_log = np.zeros((pose_data.shape[0],19))
     x_log[0,:] = x
 
     source_s_root = 1
     jumped_i = 0
-    
-    iter_list = [i for i in range(pose_data.shape[0]-1)]
-    if filt_times%2==0:
-        iter_list.reverse()
 
-    full_point_cloud = o3d.io.read_point_cloud(f"{filepath}Cropped_Frame{int(timestamp_data[0,0]-1)}.pcd")
     for i in range(pose_data.shape[0]-1):
         print("1. Load two point clouds and show initial pose")
         source = o3d.io.read_point_cloud(f"{filepath}Cropped_Frame{int(timestamp_data[i,0]-1)}.pcd")
@@ -246,19 +192,14 @@ def register_and_filter_once(x, filt_times, has_measurement):
         drotvec_real = dR_real.as_rotvec()
         
         dtime = abs(timestamp_data[i+1, 1] - timestamp_data[i, 1])
-        x_predict, P = ekf_predict(x, P, Q, dtime)
+        x_predict, P = mekf_predict(x, P, Q, dtime)
 
         o3d.geometry.PointCloud.estimate_normals(target,
             search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.01,max_nn=30))
 
-        # point to plane ICP
-        dq_predict = quaternion_mul_num(x_predict[3:7], quat_inv(x_log[i, 3:7]))
+        # point to point ICP
         current_transformation = np.identity(4)
-        # current_transformation[0:3,0:3] = Rotation.from_quat(to_scalar_last(dq_predict)).as_matrix()
 
-        # draw_registration_result_original_color(source, target, current_transformation)
-
-        iter = 100
         radius = 0.01
         source_down = source.voxel_down_sample(radius)
         target_down = target.voxel_down_sample(radius)
@@ -295,54 +236,22 @@ def register_and_filter_once(x, filt_times, has_measurement):
         single_value_min = min(source_s_root, s[5])
         source_s_root = s[5]
 
-        rand_num = np.random.uniform(0.0, 1.0)
+        result_icp = o3d.pipelines.registration.registration_icp(
+            source, target, 0.03, current_transformation,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint())
 
-        if filt_times % 2 == 1:
-            # source.estimate_normals(
-            # o3d.geometry.KDTreeSearchParamHybrid(radius=0.002, max_nn=15))
-            # target.estimate_normals(
-            # o3d.geometry.KDTreeSearchParamHybrid(radius=0.002, max_nn=15))
+        dR_estimate = Rotation.from_matrix(result_icp.transformation[:3,:3])
 
-            # result_icp = o3d.pipelines.registration.registration_icp(
-            #     source, target, 0.05, current_transformation,
-            #     o3d.pipelines.registration.TransformationEstimationPointToPlane()
-            #     ,o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=1e-12,
-            #                                         relative_rmse=1e-12,
-            #                                         max_iteration=50))
-            result_icp = o3d.pipelines.registration.registration_icp(
-                source, target, 0.03, current_transformation,
-                o3d.pipelines.registration.TransformationEstimationPointToPoint())
-
-            # result_icp = o3d.pipelines.registration.registration_icp(
-            #     source, target, 0.001, result_icp_temp.transformation,
-            #     o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-            #     o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=1e-12,
-            #                                 relative_rmse=1e-12,
-            #                                 max_iteration=50))
-            # re_result_icp_transform = repeat_register(source, target, result_icp.transformation)
-            dR_estimate = Rotation.from_matrix(result_icp.transformation[:3,:3])
-            # dR_estimate = Rotation.from_matrix(re_result_icp_transform)
-        else:
-            result_icp = o3d.pipelines.registration.registration_icp(
-                target, source, 0.03, current_transformation,
-                o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-                o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=1e-12,
-                                    relative_rmse=1e-12,
-                                    max_iteration=100))
-            dR_estimate = Rotation.from_matrix(np.linalg.inv(result_icp.transformation[:3,:3]))
-
-        # dR_estimate = generate_disturb_rotation() * dR_estimate
         dR_error =  dR_real * dR_estimate.inv()
-        # dR_error = sourceR.inv() * dR_estimate.inv() * targetR
         drotvec_error = dR_error.as_rotvec()
         print(np.linalg.norm(drotvec_error))
+        if np.linalg.norm(drotvec_error)>0.1:
+            aaa = 5
         dR_estimate_angle = np.linalg.norm(dR_estimate.as_rotvec())
 
         downsample_transformation = result_icp.transformation @ downsample_transformation
 
         if single_value_min > 0.3 and dR_estimate_angle<0.3:
-            # R = 1e-4*np.diag(np.asarray([1,1,1,0.1,0.1,0.1,0.1]))/(10*single_value_min**2)
-
             dq_estimate = dR_estimate.as_quat()
             if dq_estimate[3]>0.5:
                 dq_estimate = dq_estimate
@@ -366,30 +275,6 @@ def register_and_filter_once(x, filt_times, has_measurement):
                 # loop_start_point_cloud = copy.deepcopy(target)
                 need_loop_check = False
                 loop_detected = True
-
-
-            # New loop check method
-            # if np.linalg.norm(now_quat - nowR.as_quat())>0.5:
-            #     tmp_quat = -nowR.as_quat()
-            # else:
-            #     tmp_quat = nowR.as_quat()
-
-            # nowR_from_loop_start = nowR * loop_start_R.inv()
-            # nowR_from_loop_start_angle = np.linalg.norm(nowR_from_loop_start.as_rotvec())
-            # if need_loop_check_state==0:
-            #     if nowR_from_loop_start_angle > 1:
-            #         rtree.insert(loop_buffer_index, register_log[loop_buffer_index, 1:4].tolist())
-            #         loop_buffer_index+=1
-            #         need_loop_check_state = 1
-            # elif need_loop_check_state==1:
-            #     rtree.insert(loop_buffer_index, register_log[loop_buffer_index, 1:4].tolist())
-            #     loop_buffer_index+=1
-            #     nearest_index = list(rtree.nearest(tmp_quat[0:3].tolist(), 1))[0]
-            #     nearest_quat = register_log[nearest_index, 0:4]
-            #     diff_quat = quaternion_mul_num(to_scalar_first(tmp_quat), quat_inv(nearest_quat))
-            #     if get_quat_angle(diff_quat) < 0.5:
-            #         loop_source = o3d.io.read_point_cloud(f"{filepath}Cropped_Frame{int(timestamp_data[nearest_index,0]-1)}.pcd")
-            #         nowR = loop_closure_correction(loop_source, target, Rotation.from_quat(to_scalar_last(nearest_quat)))
 
             if i-jumped_i>=jump_step:
                 if single_value_min > 0.45:
@@ -433,22 +318,14 @@ def register_and_filter_once(x, filt_times, has_measurement):
                 tmp_quat = nowR.as_quat()
             z_measure[3:7] = to_scalar_first(tmp_quat)
             
-            x_correct, P, z_correct = ekf_update(x, x_predict, P, z_measure, R, dtime)
-            dq_correct = np.asarray([z_correct[0],z_correct[1],z_correct[2],1])
-            dR_correct = Rotation.from_quat(dq_correct/np.linalg.norm(dq_correct))
-
-            # if filt_times > 1.5 and not loop_detected:
-            #     # nowR = dR_correct * Rotation.from_quat(now_quat)
-            #     nowR = Rotation.from_quat(to_scalar_last(z_correct[3:7]))
-            #     loop_detected = False
-
-        
+            x_correct, P, z_correct = mekf_update(x_predict, P, z_measure[3:7], R, dtime)
+  
             if np.linalg.norm(now_quat - nowR.as_quat())>0.5:
                 now_quat = -nowR.as_quat()
             else:
                 now_quat = nowR.as_quat()
 
-            x_correct = normalize_state(x_correct)
+            x_correct = mekf_normalize_state(x_correct)
             x_log[i+1,:] = x_correct
             x = x_correct
 
@@ -464,52 +341,17 @@ def register_and_filter_once(x, filt_times, has_measurement):
             register_log[i+1,11:14] = dR_error_cumulative.as_euler("zyx")
 
             print(register_log[i+1,5])
-
-            # if not tmp_pc_stored:
-            #     full_point_cloud.transform(result_icp.transformation)
-            #     full_point_cloud += target
-            #     full_point_cloud,_ = full_point_cloud.remove_statistical_outlier(50, 5.0)
-            #     full_point_cloud = full_point_cloud.voxel_down_sample(0.001)
-            # else:
-            #     result_icp = o3d.pipelines.registration.registration_icp(
-            #         tmp_pc, target, 0.05, current_transformation,
-            #         o3d.pipelines.registration.TransformationEstimationPointToPoint())
-            #     full_point_cloud.transform(result_icp.transformation)
-            #     full_point_cloud += target
-            #     full_point_cloud,_ = full_point_cloud.remove_statistical_outlier(50, 5.0)
-            #     full_point_cloud = full_point_cloud.voxel_down_sample(0.001)
-            #     tmp_pc_stored = False
         else:
-
-            # dq_estimate = dR_estimate.as_quat()
-            # if dq_estimate[3]>0.5:
-            #     dq_estimate = dq_estimate
-            # else:
-            #     dq_estimate = -dq_estimate
-            # z_measure = np.zeros((7,))
-            # z_measure[0:3] = dq_estimate[0:3]
-            # z_measure[3:7] = quaternion_mul_num(to_scalar_first(dq_estimate), to_scalar_first(now_quat))
-            
-            # x_correct, P, z_correct = ekf_update(x, P, z_measure, R, dtime)
-            # dq_correct = np.asarray([z_correct[0],z_correct[1],z_correct[2],1])
-            # dR_correct = Rotation.from_quat(dq_correct/np.linalg.norm(dq_correct))
 
             if not tmp_pc_stored:
                 tmp_pc_stored = True
                 tmp_pc = copy.deepcopy(source)
 
-            x_predict = normalize_state(x_predict)
+            x_predict = mekf_update_without_correction(x_predict)
+            x_predict = mekf_normalize_state(x_predict)
             x_log[i+1,:] = x_predict
-            
-            # nowR = dR_estimate * Rotation.from_quat(now_quat)
-            # # nowR = dR_correct * Rotation.from_quat(now_quat)
-            # now_quat = to_scalar_last(quaternion_mul_num(x_predict[3:7], x_predict[9:13]))
-            # nowR = Rotation.from_quat(now_quat)
 
-            h = ekf_h(x, x_predict, dtime)
-            dq_estimate= np.asarray([h[0],h[1],h[2],1])
-            dR_estimate = Rotation.from_quat(dq_estimate/np.linalg.norm(dq_estimate))
-            nowR = dR_estimate * nowR
+            nowR = Rotation.from_quat(to_scalar_last(quaternion_mul_num(x_predict[11:15], x_predict[15:19])))
             if np.linalg.norm(now_quat - nowR.as_quat())>0.5:
                 now_quat = -nowR.as_quat()
             else:
@@ -545,69 +387,6 @@ def register_and_filter_once(x, filt_times, has_measurement):
     plt.show()
 
     return x, measurement_log
-
-def filter_without_register(x, filt_times, filepath, measurement_raw, timestamp_data):
-
-    measurement = copy.deepcopy(measurement_raw)
-    # In reverse Order
-    if filt_times%2==0:
-        measurement = measurement[::-1, :]
-        timestamp_data = timestamp_data[::-1, :]
-        for i in range(1, measurement.shape[0]):
-            measurement[measurement.shape[0] - i, 0:3] = -measurement[measurement.shape[0] - i - 1, 0:3]
-            # measurement[i, 0:3] = -measurement[i, 0:3]
-
-    # plt.figure()
-    # plt.plot(measurement[:, 0:3])
-    # plt.show()
-    if filt_times == 1:
-        x[3] = 1 
-    ## EKF SETTING
-    # x[9] = 1
-    # R = 1e-6*np.diag(np.asarray([1,1,1,0.1,0.1,0.1,0.1]))
-    # P = 1e-4*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,1,100,100,10,10,10,10]))/(10**(0*(filt_times-1)))
-    # Q = 1e-7*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,1,100,100,10,10,10,10]))/(10**(0*(filt_times-1)))
-
-    R = 1e-5*np.diag(np.asarray([1,1,1,1,1,1,1]))
-    if filt_times == 1:
-        P = 1e-4*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,1,10,10,1,1,1,1]))
-        Q = 1e-8*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,1,10,10,1,1,1,1]))
-    else:
-        # R = 1e-7*np.diag(np.asarray([1,1,1,1,1,1,1]))
-        # R = 1e-5*np.diag(np.asarray([0.01,0.01,0.001,1,1,1,1]))
-        P = 1e-4*np.diag(np.asarray([0.001,0.001,0.001,1,1,1,1,10,10,1,1,1,1]))
-        Q = 1e-8*np.diag(np.asarray([0.001,0.001,0.001,1,1,1,1,10,10,1,1,1,1]))
-        shrink_list = [3, 5, 7]
-        shrink_index = bisect(shrink_list, filt_times)
-        P[7:9,:] = P[7:9,:]/(10**shrink_index)
-        Q[7:9,:] = Q[7:9,:]/(10**shrink_index)
-        # P[9:13,:] = P[9:13,:]/(10**shrink_index)
-        # Q[9:13,:] = Q[9:13,:]/(10**shrink_index)
-        # P[3:7] = P[3:7]/(10**shrink_index)
-        # Q[3:7] = Q[3:7]/(10**shrink_index)
-
-
-
-    x_log = np.zeros((measurement.shape[0],13))
-    x_log[0,:] = x
-
-    for i in range(measurement.shape[0]-1):
-        
-        dtime = abs(timestamp_data[i+1, 1] - timestamp_data[i, 1])
-        x_predict, P = ekf_predict(x, P, Q, dtime)
-
-
-        # z_measure[3:7] = target_quat_raw
-        z_measure = measurement[i + 1, :]
-        x_correct, P, z_correct = ekf_update(x, x_predict, P, z_measure, R, dtime)
-        
-        x_correct = normalize_state(x_correct)
-
-        x_log[i+1,:] = x_correct
-        x = x_correct
-
-    np.savetxt(f"{filepath}ekf_log_all_{filt_times}.csv", x_log, delimiter=',')
-    return x
 
 def mekf_filter_without_register(x, filt_times, filepath, measurement_raw, timestamp_data):
 
@@ -657,69 +436,10 @@ def mekf_filter_without_register(x, filt_times, filepath, measurement_raw, times
     np.savetxt(f"{filepath}mekf_log_all_{filt_times}.csv", x_log, delimiter=',')
     return x
 
-def ukf_filter_without_register(x, filt_times, filepath, measurement_raw, timestamp_data):
-
-    measurement = copy.deepcopy(measurement_raw)
-    # In reverse Order
-    if filt_times%2==0:
-        measurement = measurement[::-1, :]
-        timestamp_data = timestamp_data[::-1, :]
-        for i in range(1, measurement.shape[0]):
-            measurement[measurement.shape[0] - i, 0:3] = -measurement[measurement.shape[0] - i - 1, 0:3]
-            # measurement[i, 0:3] = -measurement[i, 0:3]
-
-    dt = 0.1
-    points = MerweScaledSigmaPoints(11, alpha=.1, beta=2., kappa=-1)
-    ukf = UKF(dim_x=11, dim_z=3, dt=dt, fx=ukf_f, hx=ukf_h, points=points)
-    ukf.x = x[0:11] # initial state
-    x_global = x[11:19]
-    ukf.P *= 0.2 # initial uncertainty
-
-    ukf.R = 1e-5*np.diag(np.asarray([1,1,1]))
-    if filt_times == 1:
-        ukf.P = 1e-4*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,10,10,1,1,1]))
-        ukf.Q = 1e-8*np.diag(np.asarray([0.0001,0.0001,1,1,1,1,10,10,1,1,1]))
-    else:
-        ukf.P = 1e-4*np.diag(np.asarray([0.001,0.001,0.001,1,1,1,10,10,1,1,1]))
-        ukf.Q = 1e-8*np.diag(np.asarray([0.001,0.001,0.001,1,1,1,10,10,1,1,1]))
-        # shrink_list = [3, 5, 7]
-        # shrink_index = bisect(shrink_list, filt_times)
-        # ukf.P[6:8,:] /= (10**shrink_index)
-        # ukf.Q[6:8,:] /= (10**shrink_index)
-        # P[8:11,:] = P[8:11,:]/(10**shrink_index)
-        # Q[8:11,:] = Q[8:11,:]/(10**shrink_index)
-        # P[3:7] = P[3:7]/(10**shrink_index)
-        # Q[3:7] = Q[3:7]/(10**shrink_index)
-
-    x_log = np.zeros((measurement.shape[0],19))
-    x_log[0,0:11] = ukf.x
-    x_log[0,11:19] = x_global
-
-    for i in range(measurement.shape[0]-1):
-        
-        dtime = abs(timestamp_data[i+1, 1] - timestamp_data[i, 1])
-        ukf.predict(dt=dtime)
-
-        # z_measure[3:7] = target_quat_raw
-        z_measure = measurement[i + 1, 3:7]
-        ukf, x_global, _ = ukf_update(ukf, z_measure, x_global)
-        
-        x_global[0:4] = x_global[0:4]/np.linalg.norm(x_global[0:4])
-        x_global[4:8] = x_global[4:8]/np.linalg.norm(x_global[4:8])
-
-        x_log[i+1,0:11] = ukf.x
-        x_log[i+1,11:19] = x_global
-
-    np.savetxt(f"{filepath}ukf_log_all_{filt_times}.csv", x_log, delimiter=',')
-    x[0:11] = ukf.x
-    x[11:19] = x_global
-    return x
-
 if __name__ == '__main__':
     # x0 = np.zeros((13,))
     # x0[9] = 1
     x0 = np.zeros((19,))
-    # x0 = np.asarray([1.64E-02,	3.66E-02,	-2.49E-01,	0.00E+00,	0.00E+00,	0.00E+00,	7.62E-01,	-4.90E-02,	0.00E+00,	0.00E+00,	0.00E+00,	-6.61E-01,	5.75E-01,	-2.90E-01,	-3.85E-01,	8.74E-01,	4.59E-01,	-1.62E-01,	-1.80E-02])
     x0[11] = 1
     x0[15] = 1
     x_end, _ = register_and_filter_once(x0, 1, False)

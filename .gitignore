@@ -11,3 +11,5 @@ registration.py
 feature_register.py
 example_global_registration.py
 calc_plucker.py
+figure
+*.csv
