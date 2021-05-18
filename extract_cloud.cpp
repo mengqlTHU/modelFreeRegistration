@@ -61,20 +61,20 @@ string cloudFile; // .pcd file name
 string prevCloudFile; // .pcd file name (Old cloud)
 int i = 1; // Index for incremental file name
 
-int main() try
-{
-
-    //Load generated PCD file for viewing
-    Load_PCDFile();
-
-    cout << "Exiting Program... " << endl;
-    return EXIT_SUCCESS;
-}
-catch (const std::exception& e)
-{
-    std::cerr << e.what() << std::endl;
-    return EXIT_FAILURE;
-}
+//int main() try
+//{
+//
+//    //Load generated PCD file for viewing
+//    Load_PCDFile();
+//
+//    cout << "Exiting Program... " << endl;
+//    return EXIT_SUCCESS;
+//}
+//catch (const std::exception& e)
+//{
+//    std::cerr << e.what() << std::endl;
+//    return EXIT_FAILURE;
+//}
 
 
 void Load_PCDFile(void)

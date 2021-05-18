@@ -14,17 +14,17 @@ def get_w_in_body_frame(q1, q2, dt):
   w = (w1+w2)/2
   return w[1:]
 
-filepath = './20200112_notate/'
-qd_origin = np.asarray([0.621143100710754,0.392048569170185,-0.338417655549184,-0.588177403734311])
-# qd_true = np.asarray([0.849038414608915,0.510562868421641,0.0862028270363913,0.103448830435052])
-qd_true = np.asarray([0.855159754627616,0.517893044579683,0.0174296981037071,-0.0105732712646191])
-qd_rotate = np.asarray([0.6375,0,0,-0.7702])
-Rd_rotate = Rotation.from_quat(to_scalar_last(qd_rotate)).as_matrix()
-start_frame = 12
-end_frame = 12
-I_real = np.asarray([50, 50, 20])
-I_real = I_real/np.linalg.norm(I_real)
-matlab_interval = 0.05
+# filepath = './20200112_notate/'
+# qd_origin = np.asarray([0.621143100710754,0.392048569170185,-0.338417655549184,-0.588177403734311])
+# # qd_true = np.asarray([0.849038414608915,0.510562868421641,0.0862028270363913,0.103448830435052])
+# qd_true = np.asarray([0.855159754627616,0.517893044579683,0.0174296981037071,-0.0105732712646191])
+# qd_rotate = np.asarray([0.6375,0,0,-0.7702])
+# Rd_rotate = Rotation.from_quat(to_scalar_last(qd_rotate)).as_matrix()
+# start_frame = 12
+# end_frame = 12
+# I_real = np.asarray([50, 50, 20])
+# I_real = I_real/np.linalg.norm(I_real)
+# matlab_interval = 0.05
 
 # filepath = './20200205_3axis/'
 # qd_origin = np.asarray([0.0569346289156478,-0.0831563740366123,-0.534127353694238,-0.839375622425926])
@@ -37,26 +37,27 @@ matlab_interval = 0.05
 # I_real = I_real/np.linalg.norm(I_real)
 # matlab_interval = 0.05
 
-# filepath = './20210312_3axis/'
-# qd_origin = np.asarray([0.14,-0.03,-0.53,-0.83])
-# qd_true = np.asarray([0.839407665963232,0.534152422208151,-0.0759259370839453,0.0656598221841145])
-# qd_rotate = np.asarray([0,0,0,-1])
-# Rd_rotate = Rotation.from_quat(to_scalar_last(qd_rotate)).as_matrix()
-# start_frame = 48
-# end_frame = 12
-# I_real = np.asarray([50, 35, 20])
-# I_real = I_real/np.linalg.norm(I_real)
-# matlab_interval = 0.05
+filepath = './20210312_3axis/'
+qd_origin = np.asarray([0.14,-0.03,-0.53,-0.83])
+qd_true = np.asarray([0.839407665963232,0.534152422208151,-0.0759259370839453,0.0656598221841145])
+qd_rotate = np.asarray([0,0,0,-1])
+Rd_rotate = Rotation.from_quat(to_scalar_last(qd_rotate)).as_matrix()
+start_frame = 48
+end_frame = 12
+I_real = np.asarray([50, 35, 20])
+I_real = I_real/np.linalg.norm(I_real)
+matlab_interval = 0.05
 
-ekf_log = np.genfromtxt(f'{filepath}mekf_log_all_5.csv',delimiter=',')
+ekf_log = np.genfromtxt(f'{filepath}mekf_log_ground_truth_9.csv',delimiter=',')
 # ekf_log = np.genfromtxt(f'{filepath}ekf_log_ground_truth_7.csv',delimiter=',')
 pose_data = np.genfromtxt(f'{filepath}point_cloud_pose.txt', delimiter=',')
 timestamp_data = np.genfromtxt(f'{filepath}timestamp.txt', delimiter=',')
 wb_real_data = np.genfromtxt(f'{filepath}omega_body.csv', delimiter=',')
 measure_data = np.genfromtxt(f'{filepath}registration_measurement.csv', delimiter=',')
 
-pose_data = pose_data[start_frame:-end_frame:1,:]
-timestamp_data = timestamp_data[start_frame:-end_frame:1,:]
+skip = 1
+pose_data = pose_data[start_frame:-end_frame:skip,:]
+timestamp_data = timestamp_data[start_frame:-end_frame:skip,:]
 
 pose_data = continous_quat(pose_data)
 
@@ -125,21 +126,21 @@ print(qd_true)
 print(ekf_log[-1,15:19])
 print(quaternion_mul_num(qd_true, quat_inv(ekf_log[-1,15:19])))
 
-fig=plt.figure(1, figsize=(16,9))
-fig.subplots_adjust(bottom=0.15)
-fig.subplots_adjust(top=0.99)
-fig.subplots_adjust(right=0.99)
-color_list = ["tab:blue", "tab:orange", "tab:green"]
-var_name = ["$\omega_{px}$", "$\omega_{py}$", "$\omega_{pz}$"]
-for i in range(3):
-    plt.plot(timestamp_data[1:-1,1], wb_real[1:-1, i], '--', linewidth=3, color=color_list[i])
-    plt.plot(timestamp_data[1:-1,1], ekf_log[1:-1, i], linewidth=3, color=color_list[i], label=var_name[i])
-plt.xlabel('Time(s)')
-plt.ylabel('$\mathbf{\omega_{p}} (rad/s)$')
-plt.xticks(np.arange(0,121,step=20))
-plt.grid()
-plt.legend()
-plt.show()
+# fig=plt.figure(1, figsize=(16,9))
+# fig.subplots_adjust(bottom=0.15)
+# fig.subplots_adjust(top=0.99)
+# fig.subplots_adjust(right=0.99)
+# color_list = ["tab:blue", "tab:orange", "tab:green"]
+# var_name = ["$\omega_{px}$", "$\omega_{py}$", "$\omega_{pz}$"]
+# for i in range(3):
+#     plt.plot(timestamp_data[1:-1,1], wb_real[1:-1, i], '--', linewidth=3, color=color_list[i])
+#     plt.plot(timestamp_data[1:-1,1], ekf_log[1:-1, i], linewidth=3, color=color_list[i], label=var_name[i])
+# plt.xlabel('Time(s)')
+# plt.ylabel('$\mathbf{\omega_{p}} (rad/s)$')
+# plt.xticks(np.arange(0,121,step=20))
+# plt.grid()
+# plt.legend()
+# plt.show()
 
 fig=plt.figure(2, figsize=(16,9))
 fig.subplots_adjust(bottom=0.15)
@@ -175,9 +176,9 @@ plt.show()
 ekf_log = None
 for i in range(5):
     if ekf_log is None:
-        ekf_log = np.genfromtxt(f'{filepath}mekf_log_all_{i+1}.csv',delimiter=',')
+        ekf_log = np.genfromtxt(f'{filepath}mekf_log_ground_truth_{i+1}.csv',delimiter=',')
     else:
-        ekf_log = np.concatenate((ekf_log, np.genfromtxt(f'{filepath}mekf_log_all_{i+1}.csv',delimiter=',')))
+        ekf_log = np.concatenate((ekf_log, np.genfromtxt(f'{filepath}mekf_log_ground_truth_{i+1}.csv',delimiter=',')))
 
 I_estimate = np.zeros((ekf_log.shape[0], 3))
 

@@ -13,3 +13,9 @@ example_global_registration.py
 calc_plucker.py
 figure
 *.csv
+test_pointcloud
+extract_key_points.cpp
+feature_matching.cpp
+visualize_pc_and_keypoint.cpp
+visualize_correspondence.cpp
+compare_fpfh_and_icp.py
